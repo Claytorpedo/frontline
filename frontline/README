@@ -1,0 +1,8 @@
+frontline
+
+Used similar to an RSS feed reader for websites with predictable urls
+that don't provide RSS functionality.
+
+Set up subscriptions with the subscriptions.xml, and define your own
+subscription rules by making a class in SubscriptionInfo.cs and adding
+it to the types handled by the Subscriptions.Infos array.
