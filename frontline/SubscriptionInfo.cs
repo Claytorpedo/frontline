@@ -15,39 +15,40 @@ namespace frontline
         }
         public abstract ContentInfo FindImage(string pageBody);
         public abstract string GetName();
+        public abstract string GetLocalFileNameNoExt();
         public abstract void Increment();
+        public virtual string GetLocalPathWithoutExt() { return Path.Combine(GetName(), GetLocalFileNameNoExt()); }
     }
     public class SaizensenInfo : SubscriptionInfo
     {
         public override string GetNextPageUrl()
         {
-            return baseLink + GetPageIndex() + ".html";
+            return baseLink + GetLocalFileNameNoExt() + ".html";
         }
         public override ContentInfo FindImage(string pageBody)
         {
             var info = new ContentInfo();
             // Link format:           <baselink><folders and comic name><page#>.<an id of some kind>.<img ext -- always png?>
-            var expr = string.Format("{0}[a-z0-9-\\/\\.]+?{1}\\.[a-z0-9-\\/\\.]+?\\.{2}", baseLink, GetPageIndex(), ImageExtensions);
+            var expr = string.Format("{0}[a-z0-9-\\/\\.]+?{1}\\.[a-z0-9-\\/\\.]+?\\.{2}", baseLink, GetLocalFileNameNoExt(), ImageExtensions);
             var match = Regex.Match(pageBody, expr, RegexOptions.IgnoreCase);
             if (!match.Success)
                 throw new InvalidDataException(string.Format("Failed to find regex match for page {0} of {1}. Has the format changed?", pageIndex, name));
             info.imageURL = match.Value;
             var ext = info.imageURL.Substring(info.imageURL.LastIndexOf('.'));
-            info.localFilePath = Path.Combine(name, GetPageIndex() + ext);
+            info.localFilePath = GetLocalPathWithoutExt() + ext;
             return info;
         }
         public override string GetName()
         {
             return name;
         }
+        public override string GetLocalFileNameNoExt()
+        {
+            return pageIndex.ToString("D" + pageNumPadding);
+        }
         public override void Increment()
         {
             ++pageIndex;
-        }
-
-        public string GetPageIndex()
-        {
-            return pageIndex.ToString("D" + pageNumPadding);
         }
 
         public string baseLink;

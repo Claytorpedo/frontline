@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using CommandLine;
 
 // TODO: Launch the first new image for each thing updated?
 
@@ -12,57 +13,66 @@ namespace frontline
 {
     class Program
     {
+        class Options
+        {
+            [Option('s', "subscriptions", Required = true, HelpText = "Specify the subscriptions xml to process and update.")]
+            public string XmlFilePath { get; set; }
+            [Option('v', "verbose", Default = false, Required = false, HelpText = "Write out extra info about each download taking place.")]
+            public bool Verbose { get; set; }
+            [Option('o', "open", Default = false, Required = false, HelpText = "Open the first update for each feed with the default program for that file.")]
+            public bool OpenUpdates { get; set; }
+
+        }
         public static List<string> helpStrings = new List<string>{ "help", "?" };
         static readonly HttpClient httpClient = new HttpClient();
         static readonly WebClient webClient = new WebClient();
         static Subscriptions subscriptions = null;
         static int updatedSubscriptions = 0;
         static int updatedFiles = 0;
+        static Options options;
 
-        static void Main(string[] args)
+        static int Main(string[] args)
         {
-            if (args.Length == 0 || helpStrings.Contains(args[0]))
+            return CommandLine.Parser.Default.ParseArguments<Options>(args)
+                .MapResult(opts => { options = opts; return RunProgram(); }, _ => 1);
+        }
+
+        private static int RunProgram()
+        {
+            if (!File.Exists(options.XmlFilePath))
             {
-                Console.WriteLine("----------------------------------------------------");
-                Console.WriteLine("frontline");
-                Console.WriteLine("\nPlease supply the subscriptions file.\nUsage: frontline <path/to/my/subscriptions.xml>");
-                Console.WriteLine("----------------------------------------------------");
-                return;
-            }
-            string xmlFilePath = args[0];
-            if (!File.Exists(xmlFilePath))
-            {
-                Console.WriteLine("Error: Subscription file \"{0}\" not found.", xmlFilePath);
-                return;
+                Console.Error.WriteLine("Error: Subscription file \"{0}\" not found.", options.XmlFilePath);
+                return 1;
             }
 
+            List<string> updatesToOpen = new List<string>();
             try
             {
-                using (StreamReader reader = new StreamReader(xmlFilePath))
+                using (StreamReader reader = new StreamReader(options.XmlFilePath))
                     subscriptions = (Subscriptions)new XmlSerializer(typeof(Subscriptions)).Deserialize(reader);
 
                 foreach (var sub in subscriptions.Infos)
                 {
-                    Console.WriteLine("Updating subscription \"{0}\" (which is type \"{1}\")", sub.GetName(), nameof(sub));
+                    if (options.Verbose)
+                        Console.WriteLine("Updating subscription \"{0}\" (which is type \"{1}\")", sub.GetName(), nameof(sub));
+                    if (options.OpenUpdates)
+                        updatesToOpen.Add(sub.GetLocalPathWithoutExt());
                     RunSubscription(sub);
                 }
 
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.Message);
-            }
-
-            if (subscriptions != null && updatedFiles > 0)
-            {
-                string tempFile = xmlFilePath + ".tmp";
-                using (StreamWriter writer = new StreamWriter(tempFile))
-                    new XmlSerializer(typeof(Subscriptions)).Serialize(writer, subscriptions);
-                File.Delete(xmlFilePath);
-                File.Move(tempFile, xmlFilePath);
+                Console.Error.WriteLine(e.Message);
+                return 1;
             }
 
             Console.WriteLine("Updated {0} subscriptions with {1} files.", updatedSubscriptions, updatedFiles);
+
+            OpenFiles(updatesToOpen);
+            SaveResults();
+
+            return 0;
         }
 
         static bool RunSubscription(SubscriptionInfo sub)
@@ -83,7 +93,7 @@ namespace frontline
                 ++updatedSubscriptions;
 
             if (result == UpdateResult.Error)
-                Console.WriteLine("Encountered an error while updating feed \"{0}\".", sub.GetName());
+                Console.Error.WriteLine("Encountered an error while updating feed \"{0}\".", sub.GetName());
 
             return result == UpdateResult.UpToDate;
         }
@@ -106,7 +116,7 @@ namespace frontline
                         return UpdateResult.UpToDate;
                     }
 
-                    Console.WriteLine("Failed to get content at url {0}. With status code {1}, reason \"{2}\" ", sub.GetNextPageUrl(), response.StatusCode, response.ReasonPhrase);
+                    Console.Error.WriteLine("Failed to get content at url {0}. With status code {1}, reason \"{2}\" ", sub.GetNextPageUrl(), response.StatusCode, response.ReasonPhrase);
                     return UpdateResult.Error;
                 }
 
@@ -116,16 +126,60 @@ namespace frontline
                 string path = Path.Combine(subscriptions.SaveDir, imageInfo.localFilePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
 
-                Console.WriteLine("Downloading image from {0} and saving to \"{1}\".", imageInfo.imageURL, path);
+                if (options.Verbose)
+                    Console.WriteLine("Downloading image from {0} and saving to \"{1}\".", imageInfo.imageURL, path);
 
                 webClient.DownloadFile(imageInfo.imageURL, path);
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.Message);
+                Console.Error.WriteLine(e.Message);
                 return UpdateResult.Error;
             }
             return UpdateResult.ContentFound;
+        }
+        static void OpenFiles(List<string> localFilePathsNoExt)
+        {
+            foreach (var localPath in localFilePathsNoExt)
+            {
+                // Find the file with its extension.
+                var files = Directory.GetFiles(subscriptions.SaveDir, localPath + ".*");
+                if (files.Length == 0)
+                {
+                    Console.Error.WriteLine("Exptected to find file for \"{0}\", but none was found.", localPath);
+                    continue;
+                }
+                else if (files.Length > 1)
+                {
+                    Console.WriteLine("Warning: Expected to find 1 file for \"{0}\", found {1}. (Are there files with different extensions?)", localPath, files.Length);
+                    Console.WriteLine("Only opening files \"{0}\".", files[0]);
+                }
+                var file = files[0];
+                if (options.Verbose)
+                    Console.WriteLine("Opening file \"{0}\".", file);
+
+                try
+                {
+                    var process = new System.Diagnostics.Process();
+                    process.StartInfo = new System.Diagnostics.ProcessStartInfo(file) { UseShellExecute = true };
+                    process.Start();
+                }
+                catch (Exception e)
+                {
+                    Console.Error.WriteLine("Failed to open file \"{0}\". {1}", file, e);
+                }
+            }
+        }
+        static void SaveResults()
+        {
+            if (subscriptions != null && updatedFiles > 0)
+            {
+                string tempFile = options.XmlFilePath + ".tmp";
+                using (StreamWriter writer = new StreamWriter(tempFile))
+                    new XmlSerializer(typeof(Subscriptions)).Serialize(writer, subscriptions);
+                File.Delete(options.XmlFilePath);
+                File.Move(tempFile, options.XmlFilePath);
+            }
         }
     }
 }
