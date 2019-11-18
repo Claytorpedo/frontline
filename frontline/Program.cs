@@ -21,7 +21,6 @@ namespace frontline
             public bool Verbose { get; set; }
             [Option('o', "open", Default = false, Required = false, HelpText = "Open the first update for each feed with the default program for that file.")]
             public bool OpenUpdates { get; set; }
-
         }
         public static List<string> helpStrings = new List<string>{ "help", "?" };
         static readonly HttpClient httpClient = new HttpClient();
@@ -29,6 +28,7 @@ namespace frontline
         static Subscriptions subscriptions = null;
         static int updatedSubscriptions = 0;
         static int updatedFiles = 0;
+        static List<string> updatesToOpen = new List<string>();
         static Options options;
 
         static int Main(string[] args)
@@ -45,7 +45,6 @@ namespace frontline
                 return 1;
             }
 
-            List<string> updatesToOpen = new List<string>();
             try
             {
                 using (StreamReader reader = new StreamReader(options.XmlFilePath))
@@ -55,8 +54,6 @@ namespace frontline
                 {
                     if (options.Verbose)
                         Console.WriteLine("Updating subscription \"{0}\" (which is type \"{1}\")", sub.GetName(), nameof(sub));
-                    if (options.OpenUpdates)
-                        updatesToOpen.Add(sub.GetLocalPathWithoutExt());
                     RunSubscription(sub);
                 }
 
@@ -69,7 +66,7 @@ namespace frontline
 
             Console.WriteLine("Updated {0} subscriptions with {1} files.", updatedSubscriptions, updatedFiles);
 
-            OpenFiles(updatesToOpen);
+            OpenUpdates();
             SaveResults();
 
             return 0;
@@ -84,6 +81,10 @@ namespace frontline
                 result = GetUpdate(sub).GetAwaiter().GetResult();
                 if (result != UpdateResult.ContentFound)
                     break;
+
+                if (!updated && options.OpenUpdates)
+                    updatesToOpen.Add(sub.GetLocalPathWithoutExt());
+
                 sub.Increment();
                 ++updatedFiles;
                 updated = true;
@@ -138,9 +139,9 @@ namespace frontline
             }
             return UpdateResult.ContentFound;
         }
-        static void OpenFiles(List<string> localFilePathsNoExt)
+        static void OpenUpdates()
         {
-            foreach (var localPath in localFilePathsNoExt)
+            foreach (var localPath in updatesToOpen)
             {
                 // Find the file with its extension.
                 var files = Directory.GetFiles(subscriptions.SaveDir, localPath + ".*");
