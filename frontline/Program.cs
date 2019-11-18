@@ -21,6 +21,8 @@ namespace frontline
             public bool Verbose { get; set; }
             [Option('o', "open", Default = false, Required = false, HelpText = "Open the first update for each feed with the default program for that file.")]
             public bool OpenUpdates { get; set; }
+            [Option('p', "program", Default = "", Required = false, HelpText = "Program to open files with. Otherwise uses default application.")]
+            public string Program { get; set; }
         }
         public static List<string> helpStrings = new List<string>{ "help", "?" };
         static readonly HttpClient httpClient = new HttpClient();
@@ -162,7 +164,17 @@ namespace frontline
                 try
                 {
                     var process = new System.Diagnostics.Process();
-                    process.StartInfo = new System.Diagnostics.ProcessStartInfo(file) { UseShellExecute = true };
+                    if (options.Program.Length > 0)
+                    {
+                        process.StartInfo = new System.Diagnostics.ProcessStartInfo(
+                            Environment.ExpandEnvironmentVariables(options.Program),
+                            file)
+                        { UseShellExecute = true };
+                    }
+                    else
+                    {
+                        process.StartInfo = new System.Diagnostics.ProcessStartInfo(file) { UseShellExecute = true };
+                    }
                     process.Start();
                 }
                 catch (Exception e)
