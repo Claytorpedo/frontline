@@ -68,10 +68,10 @@ namespace frontline
 
             Console.WriteLine("Updated {0} subscriptions with {1} files.", updatedSubscriptions, updatedFiles);
 
-            OpenUpdates();
+            bool success = OpenUpdates();
             SaveResults();
 
-            return 0;
+            return success ? 0 : 1;
         }
 
         static bool RunSubscription(SubscriptionInfo sub)
@@ -141,8 +141,9 @@ namespace frontline
             }
             return UpdateResult.ContentFound;
         }
-        static void OpenUpdates()
+        static bool OpenUpdates()
         {
+            bool success = true;
             foreach (var localPath in updatesToOpen)
             {
                 // Find the file with its extension.
@@ -179,9 +180,14 @@ namespace frontline
                 }
                 catch (Exception e)
                 {
-                    Console.Error.WriteLine("Failed to open file \"{0}\". {1}", file, e);
+                    if (options.Program.Length > 0)
+                        Console.Error.WriteLine("Failed to open file \"{0}\" with program \"{1}\". {2}", file, options.Program, e);
+                    else
+                        Console.Error.WriteLine("Failed to open file \"{0}\". {1}", file, options.Program, e);
+                    success = false;
                 }
             }
+            return success;
         }
         static void SaveResults()
         {
