@@ -29,7 +29,7 @@ namespace frontline
         {
             var info = new ContentInfo();
             // Link format:           <baselink><folders and comic name><page#>.<an id of some kind>.<img ext -- always png?>
-            var expr = string.Format("{0}[a-z0-9-\\/\\.]+?{1}\\.[a-z0-9-\\/\\.]+?\\.{2}", baseLink, GetLocalFileNameNoExt(), ImageExtensions);
+            var expr = string.Format("{0}[a-z0-9-\\/\\.]+?{1}[a-z0-9-\\/\\.]*?\\.{2}", Regex.Escape(baseLink), GetLocalFileNameNoExt(), ImageExtensions);
             var match = Regex.Match(pageBody, expr, RegexOptions.IgnoreCase);
             if (!match.Success)
                 throw new InvalidDataException(string.Format("Failed to find regex match for page {0} of {1}. Has the format changed?", pageIndex, name));
