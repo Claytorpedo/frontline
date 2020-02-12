@@ -55,7 +55,7 @@ namespace frontline
                 foreach (var sub in subscriptions.Infos)
                 {
                     if (options.Verbose)
-                        Console.WriteLine("Updating subscription \"{0}\" (which is type \"{1}\")", sub.GetName(), nameof(sub));
+                        Console.WriteLine("Updating subscription \"{0}\" (which is type \"{1}\")", sub.GetName(), sub.GetType());
                     RunSubscription(sub);
                 }
 
