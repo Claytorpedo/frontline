@@ -7,8 +7,6 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using CommandLine;
 
-// TODO: Launch the first new image for each thing updated?
-
 namespace frontline
 {
     class Program
