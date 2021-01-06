@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using CommandLine;
+using System.Threading;
 
 namespace frontline
 {
@@ -22,13 +23,9 @@ namespace frontline
             [Option('p', "program", Default = "", Required = false, HelpText = "Program to open files with. Otherwise uses default application.")]
             public string Program { get; set; }
         }
-        public static List<string> helpStrings = new List<string>{ "help", "?" };
         static readonly HttpClient httpClient = new HttpClient();
         static readonly WebClient webClient = new WebClient();
         static Subscriptions subscriptions = null;
-        static int updatedSubscriptions = 0;
-        static int updatedFiles = 0;
-        static List<string> updatesToOpen = new List<string>();
         static Options options;
 
         static int Main(string[] args)
@@ -45,6 +42,7 @@ namespace frontline
                 return 1;
             }
 
+            var tasks = new List<Task<(bool, int, string)>>();
             try
             {
                 using (StreamReader reader = new StreamReader(options.XmlFilePath))
@@ -54,9 +52,10 @@ namespace frontline
                 {
                     if (options.Verbose)
                         Console.WriteLine("Updating subscription \"{0}\" (which is type \"{1}\")", sub.GetName(), sub.GetType());
-                    RunSubscription(sub);
+                    tasks.Add(RunSubscription(sub));
                 }
 
+                Task.WhenAll(tasks).GetAwaiter().GetResult();
             }
             catch (Exception e)
             {
@@ -64,47 +63,67 @@ namespace frontline
                 return 1;
             }
 
-            Console.WriteLine("Updated {0} subscriptions with {1} files.", updatedSubscriptions, updatedFiles);
+            int errorsEncountered = 0;
+            int updatedSubscriptions = 0;
+            int updatedFiles = 0;
+            var filesToOpen = new List<string>();
 
-            bool success = OpenUpdates();
-            SaveResults();
+            foreach (var task in tasks)
+            {
+                var (success, filesUpdated, fileToOpen) = task.Result;
+                if (!success)
+                    ++errorsEncountered;
+                updatedFiles += filesUpdated;
+                if (fileToOpen != null)
+                {
+                    filesToOpen.Add(fileToOpen);
+                    ++updatedSubscriptions;
+                }
+            }
 
-            return success ? 0 : 1;
+            Console.WriteLine($"Updated {updatedSubscriptions} subscriptions with {updatedFiles} files." );
+
+            if (errorsEncountered != 0)
+                Console.Error.WriteLine($"Encountered {errorsEncountered} errors." );
+
+            if (updatedFiles > 0)
+                SaveResults();
+
+            return OpenFiles(filesToOpen) ? 0 : 1;
         }
 
-        static bool RunSubscription(SubscriptionInfo sub)
+        static async Task<(bool, int, string)> RunSubscription(SubscriptionInfo sub)
         {
             UpdateResult result;
-            bool updated = false;
+            string firstNewFile = null;
+            int filesUpdated = 0;
             while (true)
             {
-                result = GetUpdate(sub).GetAwaiter().GetResult();
+                result = await TryGetNextPage(sub);
                 if (result != UpdateResult.ContentFound)
                     break;
 
-                if (!updated && options.OpenUpdates)
-                    updatesToOpen.Add(sub.GetLocalPathWithoutExt());
+                if (firstNewFile == null && options.OpenUpdates)
+                    firstNewFile = sub.GetLocalPathWithoutExt();
 
                 sub.Increment();
-                ++updatedFiles;
-                updated = true;
+                ++filesUpdated;
             }
-
-            if (updated)
-                ++updatedSubscriptions;
 
             if (result == UpdateResult.Error)
                 Console.Error.WriteLine("Encountered an error while updating feed \"{0}\".", sub.GetName());
 
-            return result == UpdateResult.UpToDate;
+            return (result == UpdateResult.UpToDate, filesUpdated, firstNewFile);
         }
+
         enum UpdateResult
         {
             UpToDate,
             ContentFound,
             Error
         }
-        static async Task<UpdateResult> GetUpdate(SubscriptionInfo sub)
+
+        static async Task<UpdateResult> TryGetNextPage(SubscriptionInfo sub)
         {
             try
             {
@@ -113,11 +132,11 @@ namespace frontline
                 {
                     if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                     {
-                        Console.WriteLine("No page yet for {0}. Stopping...", sub.GetNextPageUrl());
+                        Console.WriteLine($"No page yet for {sub.GetNextPageUrl()}. Stopping...");
                         return UpdateResult.UpToDate;
                     }
 
-                    Console.Error.WriteLine("Failed to get content at url {0}. With status code {1}, reason \"{2}\" ", sub.GetNextPageUrl(), response.StatusCode, response.ReasonPhrase);
+                    Console.Error.WriteLine($"Failed to get content at url {sub.GetNextPageUrl()}. With status code {response.StatusCode}, reason \"{response.ReasonPhrase}\".");
                     return UpdateResult.Error;
                 }
 
@@ -128,7 +147,7 @@ namespace frontline
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
 
                 if (options.Verbose)
-                    Console.WriteLine("Downloading image from {0} and saving to \"{1}\".", imageInfo.imageURL, path);
+                    Console.WriteLine($"Downloading image from {imageInfo.imageURL} and saving to \"{path}\".");
 
                 webClient.DownloadFile(imageInfo.imageURL, path);
             }
@@ -139,26 +158,27 @@ namespace frontline
             }
             return UpdateResult.ContentFound;
         }
-        static bool OpenUpdates()
+
+        static bool OpenFiles(List<string> updatedFiles)
         {
             bool success = true;
-            foreach (var localPath in updatesToOpen)
+            foreach (var localPath in updatedFiles)
             {
                 // Find the file with its extension.
                 var files = Directory.GetFiles(subscriptions.SaveDir, localPath + ".*");
                 if (files.Length == 0)
                 {
-                    Console.Error.WriteLine("Exptected to find file for \"{0}\", but none was found.", localPath);
+                    Console.Error.WriteLine($"Exptected to find file for \"{localPath}\", but none was found.");
                     continue;
                 }
                 else if (files.Length > 1)
                 {
-                    Console.WriteLine("Warning: Expected to find 1 file for \"{0}\", found {1}. (Are there files with different extensions?)", localPath, files.Length);
-                    Console.WriteLine("Only opening files \"{0}\".", files[0]);
+                    Console.WriteLine($"Warning: Expected to find 1 file for \"{localPath}\", found {files.Length}. (Are there files with different extensions?)");
+                    Console.WriteLine($"Only opening file \"{files[0]}\".");
                 }
                 var file = files[0];
                 if (options.Verbose)
-                    Console.WriteLine("Opening file \"{0}\".", file);
+                    Console.WriteLine($"Opening file \"{file}\".");
 
                 try
                 {
@@ -179,24 +199,25 @@ namespace frontline
                 catch (Exception e)
                 {
                     if (options.Program.Length > 0)
-                        Console.Error.WriteLine("Failed to open file \"{0}\" with program \"{1}\". {2}", file, options.Program, e);
+                        Console.Error.WriteLine($"Failed to open file \"{file}\" with program \"{options.Program}\". {e}");
                     else
-                        Console.Error.WriteLine("Failed to open file \"{0}\". {1}", file, options.Program, e);
+                        Console.Error.WriteLine($"Failed to open file \"{file}\". {e}");
                     success = false;
                 }
             }
             return success;
         }
+
         static void SaveResults()
         {
-            if (subscriptions != null && updatedFiles > 0)
-            {
-                string tempFile = options.XmlFilePath + ".tmp";
-                using (StreamWriter writer = new StreamWriter(tempFile))
-                    new XmlSerializer(typeof(Subscriptions)).Serialize(writer, subscriptions);
-                File.Delete(options.XmlFilePath);
-                File.Move(tempFile, options.XmlFilePath);
-            }
+            if (subscriptions == null)
+                return;
+
+            string tempFile = options.XmlFilePath + ".tmp";
+            using (StreamWriter writer = new StreamWriter(tempFile))
+                new XmlSerializer(typeof(Subscriptions)).Serialize(writer, subscriptions);
+            File.Delete(options.XmlFilePath);
+            File.Move(tempFile, options.XmlFilePath);
         }
     }
 }
