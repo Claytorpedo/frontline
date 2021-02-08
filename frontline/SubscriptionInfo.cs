@@ -13,6 +13,8 @@ namespace frontline
             public string imageURL;
             public string localFilePath;
         }
+
+        public abstract ContentInfo GetCover();
         public abstract ContentInfo FindImage(string pageBody);
         public abstract string GetName();
         public abstract string GetLocalFileNameNoExt();
@@ -24,6 +26,13 @@ namespace frontline
         public override string GetNextPageUrl()
         {
             return baseLink + GetLocalFileNameNoExt() + ".html";
+        }
+        public override ContentInfo GetCover()
+        {
+            var info = new ContentInfo();
+            info.imageURL = Path.Combine(baseLink, "res/images/cover.png");
+            info.localFilePath = Path.Combine(GetName(), "_cover.png");
+            return info;
         }
         public override ContentInfo FindImage(string pageBody)
         {

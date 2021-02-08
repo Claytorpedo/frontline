@@ -1,12 +1,10 @@
 ﻿using System;
 using System.IO;
 using System.Xml.Serialization;
-using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using CommandLine;
-using System.Threading;
 
 namespace frontline
 {
@@ -23,10 +21,9 @@ namespace frontline
             [Option('p', "program", Default = "", Required = false, HelpText = "Program to open files with. Otherwise uses default application.")]
             public string Program { get; set; }
         }
-        static readonly HttpClient httpClient = new HttpClient();
-        static readonly WebClient webClient = new WebClient();
-        static Subscriptions subscriptions = null;
-        static Options options;
+        private static HttpClient httpClient = new HttpClient(new HttpClientHandler{ MaxConnectionsPerServer = 4});
+        private static Subscriptions subscriptions = null;
+        private static Options options;
 
         static int Main(string[] args)
         {
@@ -94,6 +91,8 @@ namespace frontline
 
         static async Task<(bool, int, string)> RunSubscription(SubscriptionInfo sub)
         {
+            await GetImageIfNotExists(sub.GetCover());
+
             UpdateResult result;
             string firstNewFile = null;
             int filesUpdated = 0;
@@ -143,19 +142,46 @@ namespace frontline
                 string body = await response.Content.ReadAsStringAsync();
                 SubscriptionInfo.ContentInfo imageInfo = sub.FindImage(body);
 
-                string path = Path.Combine(subscriptions.SaveDir, imageInfo.localFilePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
-
-                if (options.Verbose)
-                    Console.WriteLine($"Downloading image from {imageInfo.imageURL} and saving to \"{path}\".");
-
-                webClient.DownloadFile(imageInfo.imageURL, path);
+                return await GetImageIfNotExists(imageInfo);
             }
             catch (Exception e)
             {
                 Console.Error.WriteLine(e.Message);
                 return UpdateResult.Error;
             }
+        }
+
+        static async Task<UpdateResult> GetImageIfNotExists(SubscriptionInfo.ContentInfo imageInfo)
+        {
+            string path = Path.Combine(subscriptions.SaveDir, imageInfo.localFilePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+
+            if (File.Exists(path))
+            {
+                if (options.Verbose)
+                    Console.WriteLine($"File {path} already exists. Skipping.");
+
+                // Act as if it is new content to update files with.
+                return UpdateResult.ContentFound;
+            }
+
+            if (options.Verbose)
+                Console.WriteLine($"Downloading image from {imageInfo.imageURL} and saving to \"{path}\".");
+
+            try
+            {
+                using (var response = await httpClient.GetAsync(imageInfo.imageURL))
+                {
+                    using (var fs = new FileStream(path, FileMode.CreateNew))
+                        await response.Content.CopyToAsync(fs);
+                }
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine(e.Message);
+                return UpdateResult.Error;
+            }
+
             return UpdateResult.ContentFound;
         }
 
