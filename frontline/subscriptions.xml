@@ -8,5 +8,12 @@
       <pageIndex>99</pageIndex>
       <pageNumPadding>4</pageNumPadding>
     </SaizensenInfo>
+    <SaizensenInfoV2>
+      <domain>https://sai-zen-sen.jp</domain>
+      <domainSubfolder>/comics/twi4/kanako/</domainSubfolder>
+      <name>Kanako</name>
+      <pageIndex>538</pageIndex>
+      <pageNumPadding>4</pageNumPadding>
+    </SaizensenInfoV2>
   </Infos>
 </Subscriptions>
